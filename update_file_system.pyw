@@ -3,45 +3,14 @@ import os.path as path
 import subprocess
 import platform
 from datetime import datetime as dt
-import urllib.request
-import time
-from time import sleep
-from ctypes import windll
-import string
-import win32api
 from win11toast import toast
+import configparser
 
+#write a function Toast to show notification
 def Toast(message):
     toast('Update File Notification', message)
 
-def GetDrives():
-    drives = []
-    bitmask = windll.kernel32.GetLogicalDrives()
-    for letter in string.ascii_uppercase:
-        if bitmask & 1:
-            drives.append(letter + ":\\")
-        bitmask >>= 1
-
-    return drives
-
-def IsInserted():
-    drives = GetDrives()
-    for drive in drives:
-        info = win32api.GetVolumeInformation(drive)
-        if info[0] == "STANLEY":
-            return True
-    
-    return False
-    
-def GetDriveByName(name):
-    drives = GetDrives()
-    for drive in drives:
-        info = win32api.GetVolumeInformation(drive)
-        if info[0] == name:
-            return drive
-    
-    return ""
-
+#write a function to write logs
 def WriteLog(message):
     try:
         filename = "update_file_log.log"
@@ -50,113 +19,85 @@ def WriteLog(message):
         f.write("[" + datetime_str + "] " + message + "\n")
         f.close()
     except:
-        #print("An exception occurred on writing logs.")
-        Toast("An exception occurred on writing logs.")
+        Notification("An exception occurred on writing logs.")
 
+#writw a function names Notification to print, Toast and WriteLog if each function flag is True
+def Notification(message, isPrint=False, isToast=False, isWriteLog=True):
+    if isPrint:
+        print(message)
+    if isToast:
+        Toast(message)
+    if isWriteLog:
+        WriteLog(message)
+
+#write a function to copy a file (not a directory and not include subdirectories) from source to destination based on different OS system, including Windows, Linux and Mac; if Windows and prompted, always 'F' for answer for xcopy
 def Copy(src, dest):
-    value = 0
+    result = 0
     try:
-        s = platform.system()
-        if s == "Linux" or s == "Darwin":
-            cmd = "copy \"" + src + "\" \"" + dest + "\""
-            value = subprocess.call(cmd, creationflags=subprocess.CREATE_NO_WINDOW)
-            if value != 0:
-                message = "[Copy] " + cmd + " : has error."
-                #print(message)
-                WriteLog(message)
-                #Toast(message)
-        elif s == "Windows":
-            cmd = "copy \"" + src + "\" \"" + dest + "\""
-            value = subprocess.call(cmd, creationflags=subprocess.CREATE_NO_WINDOW)
-            if value != 0:
-                message = "[Copy] " + cmd + " : has error."
-                #print(message)
-                WriteLog(message)
-                #Toast(message)
+        if platform.system() == "Windows":
+            subprocess.run(["xcopy", src, dest + "*", "/Y"])
+        elif platform.system() == "Linux":
+            subprocess.run(["cp", src, dest])
+        elif platform.system() == "Darwin":
+            subprocess.run(["cp", src, dest])
+        else:
+            Notification("Unknown OS system.")
+            result = 1
     except Exception as e:
-        #print(str(e) + ": " + cmd)
-        WriteLog(str(e) + ": " + cmd)
-        #Toast(str(e) + ": " + cmd)
-        value = 1
-    
-    return value
+        Notification("[Copy] occurred an error: " + str(e))
+        result = 1
+    return result
 
-def UpdateFile(source_path, dest_path, last_update_date):
-    value = 0
-    
+#write a function to update file
+def UpdateFile(src, dest_path, last_update_date):
+    result = 0
     try:
-        for name in os.listdir(source_path):
-            try:
-                f = path.join(source_path, name)
-                
-                #checking if it is a directory
-                if path.isdir(f):
-                    if path.exists(f):
-                        dest_path_f = path.join(dest_path, name)
-                        UpdateFile(f, dest_path_f, last_update_date)
-                    else:
-                        dest_f = path.join(dest_path, name)
-                        value = Copy(f, dest_f)
-                        if value == 0:
-                            message = "[Copy] Success: " + f + " to " + dest_f
-                            #print(message)
-                            WriteLog(message)
-                            Toast(message)
-                
-                #checking if it is a file
-                elif path.isfile(f):
-                    dest_f = path.join(dest_path, name)
-                    if path.exists(dest_f):
-                        m_date = dt.fromtimestamp(path.getmtime(f)).strftime("%Y/%m/%d")
-                        if m_date != None and m_date > last_update_date:
-                            value = Copy(f, dest_f)
-                            if value == 0:
-                                message = "[Copy] Success: " + f + " to " + dest_f
-                                #print(message)
-                                WriteLog(message)
-                                Toast(message)
-                    else:
-                        value = Copy(f, dest_f)
-                        if value == 0:
-                            message = "[Copy] Success: " + f + " to " + dest_f
-                            #print(message)
-                            WriteLog(message)
-                            Toast(message)
-            except Exception as e:
-                #print("[UpdateFile] " + name + " occurred an error. ", e)
-                WriteLog("[UpdateFile] " + name + " occurred an error:" + str(e))
-                Toast("[UpdateFile] " + name + " occurred an error:" + str(e))
-                value = 1
+        if path.exists(src) and path.exists(dest_path):
+            if path.isdir(src) and path.isdir(dest_path):
+                for root, dirs, files in os.walk(src):
+                    for file in files:
+                        src_file = path.join(root, file)
+                        if dt.fromtimestamp(path.getmtime(src_file)) > dt.strptime(last_update_date, "%d/%m/%Y"):
+                            dest_file = path.join(dest_path, path.relpath(src_file, src))
+                            if Copy(src_file, dest_file) == 0:
+                                Notification("Copy " + src_file + " to " + dest_file + " successfully.")
+                            else:
+                                Notification("Copy " + src_file + " to " + dest_file + " failed.")
+                                result = 1
+            else:
+                Notification(src + " or " + dest_path + " is not a directory.")
+        else:
+            Notification(src + " or " + dest_path + " is not found.")
     except Exception as e:
-        #print("[UpdateFile] " + source_path + " occurred an error. ", e)
-        WriteLog("[UpdateFile] " + source_path + " occurred an error:" + str(e))
-        Toast("[UpdateFile] " + source_path + " occurred an error:" + str(e))
-        value = 1
-    
-    return value
+        Notification("[UpdateFile] occurred an error: " + str(e))
+    return result
 
-def GetLastUpdateDate(dest_path):
-    last_update_date = None
+#write a function to get last update date from destination and if not found, create a new one
+def GetLastUpdateDate(dest):
+    date_filename = "lastUpdateDate.txt"
+    last_update_date = dt.now().strftime("%d/%m/%Y")
     
     try:
-        date_filename = "lastUpdateDate.txt"
-        
-        if dest_path == "c:\\Users\stanl.STANLEY\OneDrive":
-            dest_path = dest_path + "\Documents"
-        filename = path.join(dest_path, date_filename)
-        f = open(filename, "r")
-        last_update_date = dt.strptime(f.read(), "%d/%m/%Y").strftime("%Y/%m/%d")
-        f.close()
-        
-        if last_update_date == "":
-            last_update_date = "2021/01/01"
+        if path.exists(dest):
+            if path.isdir(dest):
+                filename = path.join(dest, date_filename)
+                if path.exists(filename):
+                    f = open(filename, "r")
+                    last_update_date = f.read()
+                    f.close()
+                else:
+                    f = open(filename, "w")
+                    f.write(last_update_date)
+                    f.close()
+            else:
+                Notification(dest + " is not a directory.")
+        else:
+            Notification(dest + " is not found.")
     except Exception as e:
-        #print("[GetLastUpdateDate] occurred an error. last_update_date: " + last_update_date + ". ", e)
-        WriteLog("[GetLastUpdateDate] occurred an error[" + last_update_date + "]: " + str(e))
-        Toast("[GetLastUpdateDate] occurred an error[" + last_update_date + "]: " + str(e))
-
+        Notification("[GetLastUpdateDate] occurred an error: " + str(e))
     return last_update_date
 
+#write a function to get last update date from destination
 def UpdateLastUpdateDate(dest_path):
     date_filename = "lastUpdateDate.txt"
     
@@ -169,39 +110,40 @@ def UpdateLastUpdateDate(dest_path):
         f.write(update_date)
         f.close()
     except Exception as e:
-        #print("[UpdateLastUpdateDate] occurred an error. last_update_date: " + update_date + ". ")
-        WriteLog("[UpdateLastUpdateDate] occurred an error[" + last_update_date + "]: " + str(e))
-        Toast("[UpdateLastUpdateDate] occurred an error. last_update_date[" + last_update_date + "]: " + str(e))
+        Notification("[UpdateLastUpdateDate] occurred an error: " + str(e))
 
-syn = r"\\Hungs\stanley\Stanley"
-dest1 = "c:\\Users\stanl.STANLEY\OneDrive"
-dest2 = GetDriveByName("STANLEY")
+#===============================================================================================================
 
-#input("Please insert external hard disk for regular file update... Press Enter to continue.")
-#while not IsInserted():
-#    Toast("'STANLEY' not found. Please check and insert")
-#    sleep(30)
-    #input("'STANLEY' not found. Please check and insert, and press Enter to continue.")
-#print("Updating...")
 Toast("Updating...")
 
-if path.exists(syn) and path.exists(dest1):
-    lastUpdateDate = GetLastUpdateDate(dest1)
-    UpdateFile(syn, dest1, lastUpdateDate)
-    UpdateLastUpdateDate(dest1)
-else:
-    #print(syn + " or " + dest1 + " is not found.")
-    WriteLog(syn + " or " + dest1 + " is not found.")
-    Toast(syn + " or " + dest1 + " is not found.")
+#write a function to get all config in FileBackup.ini by configparser
+config = configparser.ConfigParser()
+config.read('FileBackup.ini')
 
-#if path.exists(syn) and path.exists(dest2):
-#    lastUpdateDate = GetLastUpdateDate(dest2)
-#    UpdateFile(syn, dest2, lastUpdateDate)
-#    UpdateLastUpdateDate(dest2)
-#else:
-#    #print(syn + " or " + dest2 + " is not found.")
-#    WriteLog(syn + " or " + dest2 + " is not found.")
-#    Toast(syn + " or " + dest2 + " is not found.")
+#get path value from SRCPATH from config, and convert to string
+src = str(config['SRCPATH']['path'])
 
-#print("Update Complete")
+#loop through config['TGTPATH'] to get all keys and values and put them into a dictionary named "tgts"
+tgts = {}
+for key in config['TGTPATH']:
+    tgts[key] = config['TGTPATH'][key]
+
+#loop through tgts to get value, then convert to string and then store all value into an array named "dests"
+dests = []
+for tgt in tgts.values():
+    dests.append(str(tgt))
+
+#loop through dests to update files
+for dest in dests:
+    if path.exists(src) and path.exists(dest):
+        lastUpdateDate = GetLastUpdateDate(dest)
+        result = UpdateFile(src, dest, lastUpdateDate)
+        if result == 0:
+            UpdateLastUpdateDate(dest)
+    else:
+        if not path.exists(src):
+            Notification(src + " is not found.")
+        if not path.exists(dest):
+            Notification(dest + " is not found.")
+
 Toast("Update Complete. Please see log for more details.")
